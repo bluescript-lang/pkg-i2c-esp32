@@ -1,0 +1,132 @@
+
+code`
+#include "i2c_helper.c"
+`
+
+export enum I2CPort {
+    I2C0 = 0,
+    I2C1 = 1,
+    Auto = 2,
+}
+
+export enum I2CResult {
+    OK = 0,
+    Fail = 1,
+    InvalidArg = 2,
+    NoMemory = 3,
+    NotFound = 4,
+    Timeout = 5,
+    InvalidResponse = 6,
+}
+
+function portToInt(port: I2CPort) {
+    if (port === I2CPort.I2C0) {
+        return 0;
+    } else if (port === I2CPort.I2C1) {
+        return 1;
+    } else if (port === I2CPort.Auto) {
+        return -1;
+    } else {
+        code`runtime_error("** i2c module error: unknown port.");`
+        return -2; // unreachable
+    }
+}
+
+export class I2CMasterBus {
+    handle: Uint8Array;
+    lastOperationResult: I2CResult;
+
+    constructor(port: I2CPort, sda: integer, scl: integer) {
+        let handleSize: integer;
+        code`${handleSize} = sizeof(i2c_master_bus_handle_t)`;
+        this.handle = new Uint8Array(handleSize, 0);
+        const portNum = portToInt(port);
+        this.lastOperationResult = I2CResult.Fail;
+        code`${this.lastOperationResult} = bus_init(get_bus_handle(${this.handle}), ${portNum}, ${sda}, ${scl});`
+    }
+
+    probe(address: integer, timeoutMs: integer): boolean {
+        let result = false;
+        code`${result} = bus_probe(get_bus_handle(${this.handle}), ${address}, ${timeoutMs});`
+        return result;
+    }
+
+    scan(timeoutMs: integer): boolean[] {
+        const result = new Array<boolean>(127, false);
+        for (let address = 0x08; address <= 0x77; address++) {
+            result[address] = this.probe(address, timeoutMs);
+        }
+        return result;
+    }
+
+    close() {
+        code`${this.lastOperationResult} = bus_delete(get_bus_handle(${this.handle}));`
+    }
+}
+
+export class I2CDevice {
+    bus: I2CMasterBus;
+    address: integer;
+    frequency: integer;
+    handle: Uint8Array;
+    timeoutMs: integer;
+    lastOperationResult: I2CResult;
+
+    constructor(bus: I2CMasterBus, address: integer, frequency: integer, timeoutMs: integer) {
+        this.bus = bus;
+        this.address = address;
+        this.frequency = frequency;
+        this.timeoutMs = timeoutMs;
+        let handleSize: integer;
+        code`${handleSize} = sizeof(i2c_master_dev_handle_t)`;
+        this.handle = new Uint8Array(handleSize, 0);
+        this.lastOperationResult = I2CResult.Fail;
+        const busHandle = bus.handle;
+        code`
+    i2c_master_bus_handle_t* bus_handle = get_bus_handle(${busHandle});
+    i2c_master_dev_handle_t* dev_handle = get_dev_handle(${this.handle});
+    ${this.lastOperationResult} = device_init(bus_handle, dev_handle, ${address}, ${frequency});
+        `
+    }
+
+    write(data: Uint8Array) {
+        const dataLength = data.length;
+        code`
+    uint8_t* buf = get_native_ptr(${data});
+    ${this.lastOperationResult} = device_write(get_dev_handle(${this.handle}), buf, ${dataLength}, ${this.timeoutMs});
+        `
+    }
+
+    read(length: integer): Uint8Array {
+        let data = new Uint8Array(length, 0);
+        code`
+    uint8_t* buf = get_native_ptr(${data});
+    ${this.lastOperationResult} = device_read(get_dev_handle(${this.handle}), buf, ${length}, ${this.timeoutMs});
+        `
+        return data;
+    }
+
+    writeRead(writeData: Uint8Array, readLength: integer): Uint8Array {
+        const writeDataLength = writeData.length;
+        let readData = new Uint8Array(readLength, 0);
+        code`
+    uint8_t* write_buf = get_native_ptr(${writeData});
+    uint8_t* read_buf = get_native_ptr(${readData});
+    ${this.lastOperationResult} = device_write_read(
+        get_dev_handle(${this.handle}),
+        write_buf, ${writeDataLength},
+        read_buf, ${readLength},
+        ${this.timeoutMs}
+    );
+        `
+        return readData;
+    }
+
+    probe(): boolean {
+        return this.bus.probe(this.address, this.timeoutMs);
+    }
+
+    close() {
+        code`${this.lastOperationResult} = device_delete(get_dev_handle(${this.handle}));`
+    }
+}
