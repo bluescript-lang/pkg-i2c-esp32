@@ -50,10 +50,17 @@ export class I2CMasterBus {
         return result;
     }
 
-    scan(timeoutMs: integer): boolean[] {
-        const result = new Array<boolean>(127, false);
+    scan(timeoutMs: integer): integer[] {
+        // Since BlueScript does not support creating variable-length integer arrays, the implementation is as follows.
+        const resultAny = [];
         for (let address = 0x08; address <= 0x77; address++) {
-            result[address] = this.probe(address, timeoutMs);
+            if (this.probe(address, timeoutMs)) {
+                resultAny.push(address);
+            }
+        }
+        const result = new Array<integer>(resultAny.length, 0);
+        for (let i = 0; i < resultAny.length; i++) {
+            result[i] = resultAny[i];
         }
         return result;
     }
