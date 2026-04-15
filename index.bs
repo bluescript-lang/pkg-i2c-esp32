@@ -1,7 +1,6 @@
 
-code`
-#include "i2c_helper.c"
-`
+code`#include "i2c_helper.c"`
+
 
 export enum I2CPort {
     I2C0 = 0,
@@ -116,6 +115,41 @@ export class I2CDevice {
         get_dev_handle(${this.handle}),
         write_buf, ${writeDataLength},
         read_buf, ${readLength},
+        ${this.timeoutMs}
+    );
+        `
+        return readData;
+    }
+
+    writeRegister(register: integer, data: integer[]) {
+        const length = data.length + 1;
+        code`
+    uint8_t buf[${length}];
+    buf[0] = (uint8_t)${register};
+    `
+        for (let i = 1; i <= length; i++) {
+            let val = data[i];
+            code`buf[${i}] = (uint8_t)${val}`
+        }
+        code`${this.lastOperationResult} = device_write(get_dev_handle(${this.handle}), buf, ${length}, ${this.timeoutMs});`
+    }
+
+    writeRegisterByte(register: integer, value: integer) {
+        code`
+    uint8_t buf[] = {(uint8_t)${register}, (uint8_t)${value}};
+    ${this.lastOperationResult} = device_write(get_dev_handle(${this.handle}), buf, 2, ${this.timeoutMs});
+        `
+    }
+
+    readRegister(register: integer, length: integer): Uint8Array {
+        let readData = new Uint8Array(length, 0);
+        code`
+    uint8_t reg = (uint8_t)${register};
+    uint8_t* read_buf = get_native_ptr(${readData});
+    ${this.lastOperationResult} = device_write_read(
+        get_dev_handle(${this.handle}),
+        &reg, 1,
+        read_buf, ${length},
         ${this.timeoutMs}
     );
         `
