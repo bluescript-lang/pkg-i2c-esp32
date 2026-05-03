@@ -32,21 +32,20 @@ function portToInt(port: I2CPort) {
 }
 
 export class I2CMasterBus {
-    handle: Uint8Array;
+    handle: integer;
     lastOperationResult: I2CResult;
 
     constructor(port: I2CPort, sda: integer, scl: integer) {
-        let handleSize: integer;
-        code`${handleSize} = sizeof(i2c_master_bus_handle_t)`;
-        this.handle = new Uint8Array(handleSize, 0);
         const portNum = portToInt(port);
         this.lastOperationResult = I2CResult.Fail;
-        code`${this.lastOperationResult} = bus_init(get_bus_handle(${this.handle}), ${portNum}, ${sda}, ${scl});`
+        let handle = 0;
+        code`${this.lastOperationResult} = bus_new(${portNum}, ${sda}, ${scl}, &${handle});`
+        this.handle = handle;
     }
 
     probe(address: integer, timeoutMs: integer): boolean {
         let result = false;
-        code`${result} = bus_probe(get_bus_handle(${this.handle}), ${address}, ${timeoutMs});`
+        code`${result} = bus_probe(${this.handle}, ${address}, ${timeoutMs});`
         return result;
     }
 
@@ -66,48 +65,44 @@ export class I2CMasterBus {
     }
 
     close() {
-        code`${this.lastOperationResult} = bus_delete(get_bus_handle(${this.handle}));`
+        code`${this.lastOperationResult} = bus_delete(${this.handle});`
     }
 }
 
 export class I2CDevice {
+    handle: integer;
+    busHandle: integer;
     bus: I2CMasterBus;
     address: integer;
     frequency: integer;
-    handle: Uint8Array;
     timeoutMs: integer;
     lastOperationResult: I2CResult;
 
     constructor(bus: I2CMasterBus, address: integer, frequency: integer, timeoutMs: integer) {
+        this.busHandle = bus.handle;
         this.bus = bus;
         this.address = address;
         this.frequency = frequency;
         this.timeoutMs = timeoutMs;
-        let handleSize: integer;
-        code`${handleSize} = sizeof(i2c_master_dev_handle_t)`;
-        this.handle = new Uint8Array(handleSize, 0);
         this.lastOperationResult = I2CResult.Fail;
-        const busHandle = bus.handle;
-        code`
-    i2c_master_bus_handle_t* bus_handle = get_bus_handle(${busHandle});
-    i2c_master_dev_handle_t* dev_handle = get_dev_handle(${this.handle});
-    ${this.lastOperationResult} = device_init(bus_handle, dev_handle, ${address}, ${frequency});
-        `
+        const handle = 0;
+        code`${this.lastOperationResult} = device_new(${this.busHandle}, ${address}, ${frequency}, &${handle});`
+        this.handle = handle;
     }
 
     write(data: Uint8Array) {
         const dataLength = data.length;
         code`
-    uint8_t* buf = get_native_ptr(${data});
-    ${this.lastOperationResult} = device_write(get_dev_handle(${this.handle}), buf, ${dataLength}, ${this.timeoutMs});
+        uint8_t* buf = get_native_ptr(${data});
+        ${this.lastOperationResult} = device_write(${this.handle}, buf, ${dataLength}, ${this.timeoutMs});
         `
     }
 
     read(length: integer): Uint8Array {
         let data = new Uint8Array(length, 0);
         code`
-    uint8_t* buf = get_native_ptr(${data});
-    ${this.lastOperationResult} = device_read(get_dev_handle(${this.handle}), buf, ${length}, ${this.timeoutMs});
+        uint8_t* buf = get_native_ptr(${data});
+        ${this.lastOperationResult} = device_read(${this.handle}, buf, ${length}, ${this.timeoutMs});
         `
         return data;
     }
@@ -116,14 +111,14 @@ export class I2CDevice {
         const writeDataLength = writeData.length;
         let readData = new Uint8Array(readLength, 0);
         code`
-    uint8_t* write_buf = get_native_ptr(${writeData});
-    uint8_t* read_buf = get_native_ptr(${readData});
-    ${this.lastOperationResult} = device_write_read(
-        get_dev_handle(${this.handle}),
-        write_buf, ${writeDataLength},
-        read_buf, ${readLength},
-        ${this.timeoutMs}
-    );
+        uint8_t* write_buf = get_native_ptr(${writeData});
+        uint8_t* read_buf = get_native_ptr(${readData});
+        ${this.lastOperationResult} = device_write_read(
+            ${this.handle},
+            write_buf, ${writeDataLength},
+            read_buf, ${readLength},
+            ${this.timeoutMs}
+        );
         `
         return readData;
     }
@@ -131,34 +126,34 @@ export class I2CDevice {
     writeRegister(register: integer, data: integer[]) {
         const length = data.length + 1;
         code`
-    uint8_t buf[${length}];
-    buf[0] = (uint8_t)${register};
-    `
+        uint8_t buf[${length}];
+        buf[0] = (uint8_t)${register};
+        `
         for (let i = 1; i <= length; i++) {
             let val = data[i];
             code`buf[${i}] = (uint8_t)${val}`
         }
-        code`${this.lastOperationResult} = device_write(get_dev_handle(${this.handle}), buf, ${length}, ${this.timeoutMs});`
+        code`${this.lastOperationResult} = device_write(${this.handle}, buf, ${length}, ${this.timeoutMs});`
     }
 
     writeRegisterByte(register: integer, value: integer) {
         code`
-    uint8_t buf[] = {(uint8_t)${register}, (uint8_t)${value}};
-    ${this.lastOperationResult} = device_write(get_dev_handle(${this.handle}), buf, 2, ${this.timeoutMs});
+        uint8_t buf[] = {(uint8_t)${register}, (uint8_t)${value}};
+        ${this.lastOperationResult} = device_write(${this.handle}, buf, 2, ${this.timeoutMs});
         `
     }
 
     readRegister(register: integer, length: integer): Uint8Array {
         let readData = new Uint8Array(length, 0);
         code`
-    uint8_t reg = (uint8_t)${register};
-    uint8_t* read_buf = get_native_ptr(${readData});
-    ${this.lastOperationResult} = device_write_read(
-        get_dev_handle(${this.handle}),
-        &reg, 1,
-        read_buf, ${length},
-        ${this.timeoutMs}
-    );
+        uint8_t reg = (uint8_t)${register};
+        uint8_t* read_buf = get_native_ptr(${readData});
+        ${this.lastOperationResult} = device_write_read(
+            ${this.handle},
+            &reg, 1,
+            read_buf, ${length},
+            ${this.timeoutMs}
+        );
         `
         return readData;
     }
@@ -168,6 +163,6 @@ export class I2CDevice {
     }
 
     close() {
-        code`${this.lastOperationResult} = device_delete(get_dev_handle(${this.handle}));`
+        code`${this.lastOperationResult} = device_delete(${this.handle});`
     }
 }
